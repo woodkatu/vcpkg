@@ -47,7 +47,7 @@ endif()
 
 set(OPTIONS "--enable-asm --enable-x86asm --disable-doc --enable-debug --enable-runtime-cpudetect")
 
-if(VCPKG_TARGET_IS_WINDOWS)
+if(VCPKG_HOST_IS_WINDOWS)
     if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm" OR VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")
         vcpkg_acquire_msys(MSYS_ROOT
             DIRECT_PACKAGES
@@ -76,7 +76,7 @@ if(VCPKG_TARGET_IS_WINDOWS)
         elseif(VCPKG_TARGET_ARCHITECTURE STREQUAL "x64")
             set(OPTIONS "--target-os=mingw64 ${OPTIONS}")
         endif()
-    else()
+    elseif(VCPKG_TARGET_IS_WINDOWS)
         set(OPTIONS "--toolchain=msvc ${OPTIONS}")
     endif()
 else()
@@ -89,6 +89,7 @@ set(_csc_PROJECT_PATH ffmpeg)
 
 file(REMOVE_RECURSE ${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-dbg ${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-rel)
 
+# setup features 
 if("nonfree" IN_LIST FEATURES)
     set(OPTIONS "${OPTIONS} --enable-nonfree")
 endif()
@@ -379,6 +380,37 @@ if(VCPKG_TARGET_IS_UWP)
     set(OPTIONS "${OPTIONS} --disable-programs")
     set(OPTIONS "${OPTIONS} --extra-cflags=-DWINAPI_FAMILY=WINAPI_FAMILY_APP --extra-cflags=-D_WIN32_WINNT=0x0A00")
     set(OPTIONS_CROSS " --enable-cross-compile --target-os=win32 --arch=${VCPKG_TARGET_ARCHITECTURE}")
+endif()
+
+if(VCPKG_TARGET_IS_ANDROID)
+    # check if ANDROID_NDK_HOME is set
+    if(NOT DEFINED ENV{ANDROID_NDK_HOME})
+        message(FATAL_ERROR "Could not find android ndk. Please set environment variable ANDROID_NDK_HOME to ndk path")
+    endif()
+    # setup ANDROID_ABI
+    if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm")
+        set(ANDROID_ABI armeabi-v7a)
+    elseif(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")
+        set(ANDROID_ABI arm64-v8a)
+    else()
+        message(FATAL_ERROR "target arch not support")
+    endif()
+    # ffmpeg is c-library, c++ stl is not required
+    set(ANDROID_STL none)
+    # use android.toolchain.cmake to set android environment
+    include("$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake")
+    message("ANDROID_PLATFORM:${ANDROID_PLATFORM}")
+    message("ANDROID_TOOLCHAIN_ROOT:${ANDROID_TOOLCHAIN_ROOT}")
+    message("ANDROID_COMPILER_FLAGS:${ANDROID_COMPILER_FLAGS}")
+
+    # set options
+    set(sysroot "${ANDROID_TOOLCHAIN_ROOT}/sysroot")
+    set(cc "${ANDROID_TOOLCHAIN_ROOT}/bin/clang${ANDROID_TOOLCHAIN_SUFFIX}")
+
+    string(REPLACE " --enable-x86asm" "" OPTIONS ${OPTIONS})
+    set(OPTIONS_CROSS " --enable-cross-compile --enable-mediacodec --enable-jni --enable-indev=android_camera --target-os=android --arch=${VCPKG_TARGET_ARCHITECTURE} --cross-prefix=${CMAKE_LIBRARY_ARCHITECTURE}- --cc=${cc}")
+    set(OPTIONS_CROSS "${OPTIONS_CROSS} --extra-cflags=\"-Wa,--noexecstack -fdata-sections -ffunction-sections -fstack-protector-strong -ffast-math -fstrict-aliasing -march=armv7-a -mtune=cortex-a8 -mfloat-abi=softfp -mfpu=vfpv3-d16 -D__ANDROID_API__=${ANDROID_PLATFORM_LEVEL} --sysroot ${sysroot} -isystem ${sysroot}/usr/include/${CMAKE_LIBRARY_ARCHITECTURE} --target=${ANDROID_LLVM_TRIPLE}\"")
+    set(OPTIONS_CROSS "${OPTIONS_CROSS} --extra-ldflags=\"-Wl,--gc-sections -Wl,-z,relro -Wl,-z,now -fuse-ld=lld -rtlib=compiler-rt --sysroot ${sysroot} --target=${ANDROID_LLVM_TRIPLE}\"")
 endif()
 
 set(OPTIONS_DEBUG "--debug") # Note: --disable-optimizations can't be used due to http://ffmpeg.org/pipermail/libav-user/2013-March/003945.html
